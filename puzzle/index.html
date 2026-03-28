@@ -6,188 +6,218 @@
 <title>Sliding Block Puzzle</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: #f0f0f0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: sans-serif; }
-  h1 { font-size: 20px; font-weight: 500; margin-bottom: 1rem; color: #222; }
-  .puzzle-wrap { display: flex; flex-direction: column; align-items: center; gap: 1rem; }
+  body { background: #f0f0f0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: sans-serif; gap: 1rem; }
+  h1 { font-size: 20px; font-weight: 500; color: #222; }
   .board { position: relative; width: 336px; height: 420px; background: #1a1a1a; border: 3px solid #1a1a1a; border-radius: 10px; user-select: none; flex-shrink: 0; }
   .cell-bg { position: absolute; background: #2e2e2e; border-radius: 6px; }
-  .piece { position: absolute; cursor: grab; border-radius: 10px; display: flex; align-items: center; justify-content: center; z-index: 2; box-sizing: border-box; }
+  .goal-cell { position: absolute; border-radius: 6px; z-index: 1; pointer-events: none; }
+  .piece { position: absolute; cursor: grab; border-radius: 10px; display: flex; align-items: center; justify-content: center; z-index: 2; box-sizing: border-box; transition: left 0.15s, top 0.15s; }
   .piece:active { cursor: grabbing; }
-  .piece.dragging { opacity: 0.88; z-index: 10; pointer-events: none; }
+  .piece.dragging { opacity: 0.88; z-index: 10; pointer-events: none; transition: none; }
   .circle { border-radius: 50%; pointer-events: none; flex-shrink: 0; }
-  .controls { display: flex; align-items: center; gap: 1.5rem; }
+  .controls { display: flex; align-items: center; gap: 1rem; }
   .move-counter { font-size: 14px; color: #666; }
   .move-counter span { font-size: 18px; font-weight: 500; color: #222; }
-  .reset-btn { font-size: 13px; padding: 6px 18px; cursor: pointer; border: 1px solid #bbb; border-radius: 8px; background: transparent; color: #222; }
-  .reset-btn:hover { background: #e8e8e8; }
+  .btn { font-size: 13px; padding: 6px 16px; cursor: pointer; border: 1px solid #bbb; border-radius: 8px; background: transparent; color: #222; }
+  .btn:hover { background: #e8e8e8; }
+  .btn:disabled { opacity: 0.35; cursor: default; }
+  .btn:disabled:hover { background: transparent; }
+  .win-banner { position: absolute; inset: 0; background: rgba(0,0,0,0.72); border-radius: 9px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; z-index: 20; }
+  .win-banner h2 { color: #fff; font-size: 22px; font-weight: 500; }
+  .win-banner p { color: #ccc; font-size: 15px; }
+  .win-banner button { margin-top: 8px; font-size: 13px; padding: 7px 20px; cursor: pointer; border: 1px solid #aaa; border-radius: 8px; background: transparent; color: #fff; }
+  .win-banner button:hover { background: rgba(255,255,255,0.1); }
 </style>
 </head>
 <body>
 <h1>Sliding Block Puzzle</h1>
-<div class="puzzle-wrap">
-  <div class="board" id="board"></div>
-  <div class="controls">
-    <div class="move-counter">Moves: <span id="moves">0</span></div>
-    <button class="reset-btn" onclick="resetPuzzle()">Reset</button>
-  </div>
+<div class="board" id="board"></div>
+<div class="controls">
+  <div class="move-counter">Moves: <span id="moves">0</span></div>
+  <button class="btn" id="undo-btn" onclick="undoMove()" disabled>↩ Undo</button>
+  <button class="btn" onclick="resetPuzzle()">Reset</button>
 </div>
 
 <script>
-const COLS = 4, ROWS = 5, CELL = 80, GAP = 4;
+const COLS=4,ROWS=5,CELL=80,GAP=4;
+function px(c){return c*(CELL+GAP);}
+function py(r){return r*(CELL+GAP);}
+function pw(w){return w*CELL+(w-1)*GAP;}
+function ph(h){return h*CELL+(h-1)*GAP;}
 
-function px(col) { return col * (CELL + GAP); }
-function py(row) { return row * (CELL + GAP); }
-function pw(w)   { return w * CELL + (w - 1) * GAP; }
-function ph(h)   { return h * CELL + (h - 1) * GAP; }
-
-const COLORS = {
-  gold: { bg: '#C8880A', border: '#9A6406', circle: '#E8A820' },
-  red:  { bg: '#8B1A1A', border: '#5A0E0E', circle: '#CC3333' },
-  blue: { bg: '#1A3D8B', border: '#0F2660', circle: '#3366CC' },
+const COLORS={
+  gold:{bg:'#C8880A',border:'#9A6406',circle:'#E8A820'},
+  red: {bg:'#8B1A1A',border:'#5A0E0E',circle:'#CC3333'},
+  blue:{bg:'#1A3D8B',border:'#0F2660',circle:'#3366CC'},
 };
 
-const INITIAL = [
-  { id: 'g1', color: 'gold', col: 0, row: 0, w: 1, h: 2 },
-  { id: 'r1', color: 'red',  col: 1, row: 0, w: 2, h: 2 },
-  { id: 'g2', color: 'gold', col: 3, row: 0, w: 1, h: 2 },
-  { id: 'g3', color: 'gold', col: 1, row: 2, w: 2, h: 1 },
-  { id: 'g4', color: 'gold', col: 0, row: 3, w: 1, h: 2 },
-  { id: 'b1', color: 'blue', col: 1, row: 3, w: 1, h: 1 },
-  { id: 'b2', color: 'blue', col: 2, row: 3, w: 1, h: 1 },
-  { id: 'b3', color: 'blue', col: 1, row: 4, w: 1, h: 1 },
-  { id: 'b4', color: 'blue', col: 2, row: 4, w: 1, h: 1 },
-  { id: 'g5', color: 'gold', col: 3, row: 3, w: 1, h: 2 },
+const INITIAL=[
+  {id:'g1',color:'gold',col:0,row:0,w:1,h:2},
+  {id:'r1',color:'red', col:1,row:0,w:2,h:2},
+  {id:'g2',color:'gold',col:3,row:0,w:1,h:2},
+  {id:'g3',color:'gold',col:1,row:2,w:2,h:1},
+  {id:'g4',color:'gold',col:0,row:3,w:1,h:2},
+  {id:'b1',color:'blue',col:1,row:3,w:1,h:1},
+  {id:'b2',color:'blue',col:2,row:3,w:1,h:1},
+  {id:'b3',color:'blue',col:1,row:4,w:1,h:1},
+  {id:'b4',color:'blue',col:2,row:4,w:1,h:1},
+  {id:'g5',color:'gold',col:3,row:3,w:1,h:2},
 ];
 
-let pieces = [];
-let moveCount = 0;
+const GOAL_COL=1,GOAL_ROW=3;
+let pieces=[],moveCount=0,history=[];
 
-function buildCells() {
-  const board = document.getElementById('board');
-  for (let r = 0; r < ROWS; r++)
-    for (let c = 0; c < COLS; c++) {
-      const d = document.createElement('div');
-      d.className = 'cell-bg';
-      d.style.cssText = `left:${px(c)}px;top:${py(r)}px;width:${CELL}px;height:${CELL}px;`;
+function buildCells(){
+  const board=document.getElementById('board');
+  for(let r=GOAL_ROW;r<GOAL_ROW+2;r++)
+    for(let c=GOAL_COL;c<GOAL_COL+2;c++){
+      const d=document.createElement('div');
+      d.className='goal-cell';
+      d.style.cssText=`left:${px(c)}px;top:${py(r)}px;width:${CELL}px;height:${CELL}px;background:rgba(180,30,30,0.18);`;
+      board.appendChild(d);
+    }
+  for(let r=0;r<ROWS;r++)
+    for(let c=0;c<COLS;c++){
+      const d=document.createElement('div');
+      d.className='cell-bg';
+      d.style.cssText=`left:${px(c)}px;top:${py(r)}px;width:${CELL}px;height:${CELL}px;`;
       board.appendChild(d);
     }
 }
 
-function getOccupied(excludeId) {
-  const occ = new Set();
-  for (const p of pieces) {
-    if (p.id === excludeId) continue;
-    for (let r = p.row; r < p.row + p.h; r++)
-      for (let c = p.col; c < p.col + p.w; c++)
-        occ.add(r + ',' + c);
+function getOccupied(excludeId){
+  const s=new Set();
+  for(const p of pieces){
+    if(p.id===excludeId)continue;
+    for(let r=p.row;r<p.row+p.h;r++)
+      for(let c=p.col;c<p.col+p.w;c++)
+        s.add(r*4+c);
   }
-  return occ;
+  return s;
 }
 
-function canPlace(col, row, w, h, excludeId) {
-  if (col < 0 || row < 0 || col + w > COLS || row + h > ROWS) return false;
-  const occ = getOccupied(excludeId);
-  for (let r = row; r < row + h; r++)
-    for (let c = col; c < col + w; c++)
-      if (occ.has(r + ',' + c)) return false;
+function canSlide(piece,tc,tr){
+  const dc=tc-piece.col,dr=tr-piece.row;
+  if((dc&&dr)||(!dc&&!dr))return false;
+  if(tc<0||tc+piece.w>COLS||tr<0||tr+piece.h>ROWS)return false;
+  const o=getOccupied(piece.id);
+  if(!dr){const st=dc>0?1:-1;for(let c=piece.col+st;c!==tc+st;c+=st)for(let r=piece.row;r<piece.row+piece.h;r++)if(o.has(r*4+(dc>0?c+piece.w-1:c)))return false;}
+  else{const st=dr>0?1:-1;for(let r=piece.row+st;r!==tr+st;r+=st)for(let c=piece.col;c<piece.col+piece.w;c++)if(o.has((dr>0?r+piece.h-1:r)*4+c))return false;}
   return true;
 }
 
-function renderPiece(p) {
-  const board = document.getElementById('board');
-  let el = document.getElementById('piece-' + p.id);
-  const c = COLORS[p.color];
-
-  if (!el) {
-    el = document.createElement('div');
-    el.className = 'piece';
-    el.id = 'piece-' + p.id;
-    el.style.background = c.bg;
-    el.style.border = '3px solid ' + c.border;
-
-    const circ = document.createElement('div');
-    circ.className = 'circle';
-    circ.style.cssText = `width:52px;height:52px;background:${c.circle};`;
+function renderPiece(p){
+  const board=document.getElementById('board');
+  let el=document.getElementById('piece-'+p.id);
+  const c=COLORS[p.color];
+  if(!el){
+    el=document.createElement('div');
+    el.className='piece';
+    el.id='piece-'+p.id;
+    el.style.background=c.bg;
+    el.style.border='3px solid '+c.border;
+    const circ=document.createElement('div');
+    circ.className='circle';
+    circ.style.cssText=`width:52px;height:52px;background:${c.circle};`;
     el.appendChild(circ);
-
     board.appendChild(el);
-    el.addEventListener('mousedown', e => startDrag(e, p.id));
-    el.addEventListener('touchstart', e => startDrag(e, p.id), { passive: false });
+    el.addEventListener('mousedown',e=>startDrag(e,p.id));
+    el.addEventListener('touchstart',e=>startDrag(e,p.id),{passive:false});
   }
-
-  el.style.left   = px(p.col) + 'px';
-  el.style.top    = py(p.row) + 'px';
-  el.style.width  = pw(p.w) + 'px';
-  el.style.height = ph(p.h) + 'px';
+  el.style.left=px(p.col)+'px';
+  el.style.top=py(p.row)+'px';
+  el.style.width=pw(p.w)+'px';
+  el.style.height=ph(p.h)+'px';
 }
 
-function startDrag(e, id) {
+function startDrag(e,id){
   e.preventDefault();
-  const board = document.getElementById('board');
-  const boardRect = board.getBoundingClientRect();
-  const piece = pieces.find(p => p.id === id);
-  const el = document.getElementById('piece-' + id);
-
-  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-  const grabOffX = clientX - boardRect.left - px(piece.col);
-  const grabOffY = clientY - boardRect.top  - py(piece.row);
-
+  const board=document.getElementById('board');
+  const rect=board.getBoundingClientRect();
+  const piece=pieces.find(p=>p.id===id);
+  const el=document.getElementById('piece-'+id);
+  const cx=e.touches?e.touches[0].clientX:e.clientX;
+  const cy=e.touches?e.touches[0].clientY:e.clientY;
+  const offX=cx-rect.left-px(piece.col);
+  const offY=cy-rect.top-py(piece.row);
+  const sc=piece.col,sr=piece.row;
   el.classList.add('dragging');
-  el.style.transition = 'none';
+  el.style.transition='none';
 
-  function onMove(ev) {
+  function onMove(ev){
     ev.preventDefault();
-    const cx = ev.touches ? ev.touches[0].clientX : ev.clientX;
-    const cy = ev.touches ? ev.touches[0].clientY : ev.clientY;
-    el.style.left = (cx - boardRect.left - grabOffX) + 'px';
-    el.style.top  = (cy - boardRect.top  - grabOffY) + 'px';
+    const x=ev.touches?ev.touches[0].clientX:ev.clientX;
+    const y=ev.touches?ev.touches[0].clientY:ev.clientY;
+    el.style.left=(x-rect.left-offX)+'px';
+    el.style.top=(y-rect.top-offY)+'px';
   }
-
-  function onEnd(ev) {
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onEnd);
-    document.removeEventListener('touchmove', onMove);
-    document.removeEventListener('touchend', onEnd);
-
+  function onEnd(ev){
+    document.removeEventListener('mousemove',onMove);
+    document.removeEventListener('mouseup',onEnd);
+    document.removeEventListener('touchmove',onMove);
+    document.removeEventListener('touchend',onEnd);
     el.classList.remove('dragging');
-    el.style.transition = '';
-
-    const cx = ev.changedTouches ? ev.changedTouches[0].clientX : ev.clientX;
-    const cy = ev.changedTouches ? ev.changedTouches[0].clientY : ev.clientY;
-    const relX = cx - boardRect.left - grabOffX;
-    const relY = cy - boardRect.top  - grabOffY;
-    const targetCol = Math.round(relX / (CELL + GAP));
-    const targetRow = Math.round(relY / (CELL + GAP));
-
-    if ((targetCol !== piece.col || targetRow !== piece.row) &&
-        canPlace(targetCol, targetRow, piece.w, piece.h, id)) {
-      piece.col = targetCol;
-      piece.row = targetRow;
+    const x=ev.changedTouches?ev.changedTouches[0].clientX:ev.clientX;
+    const y=ev.changedTouches?ev.changedTouches[0].clientY:ev.clientY;
+    let tc=Math.round((x-rect.left-offX)/(CELL+GAP));
+    let tr=Math.round((y-rect.top-offY)/(CELL+GAP));
+    tc=Math.max(0,Math.min(COLS-piece.w,tc));
+    tr=Math.max(0,Math.min(ROWS-piece.h,tr));
+    const dc=tc-sc,dr=tr-sr;
+    if(dc&&dr){if(Math.abs(dc)>=Math.abs(dr))tr=sr;else tc=sc;}
+    if((tc!==sc||tr!==sr)&&canSlide(piece,tc,tr)){
+      history.push({id,fromCol:sc,fromRow:sr});
+      piece.col=tc;piece.row=tr;
       moveCount++;
-      document.getElementById('moves').textContent = moveCount;
+      document.getElementById('moves').textContent=moveCount;
+      document.getElementById('undo-btn').disabled=false;
+      renderPiece(piece);
+      checkWin();
+    } else {
+      renderPiece(piece);
     }
-
-    renderPiece(piece);
   }
-
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onEnd);
-  document.addEventListener('touchmove', onMove, { passive: false });
-  document.addEventListener('touchend', onEnd);
+  document.addEventListener('mousemove',onMove);
+  document.addEventListener('mouseup',onEnd);
+  document.addEventListener('touchmove',onMove,{passive:false});
+  document.addEventListener('touchend',onEnd);
 }
 
-function resetPuzzle() {
-  pieces = INITIAL.map(p => ({ ...p }));
-  moveCount = 0;
-  document.getElementById('moves').textContent = '0';
-  document.querySelectorAll('.piece').forEach(el => el.remove());
-  pieces.forEach(p => renderPiece(p));
+function checkWin(){
+  const red=pieces.find(p=>p.id==='r1');
+  if(red.col!==GOAL_COL||red.row!==GOAL_ROW)return;
+  setTimeout(()=>{
+    const board=document.getElementById('board');
+    const banner=document.createElement('div');
+    banner.className='win-banner';
+    banner.innerHTML=`<h2>Puzzle solved!</h2><p>You completed it in <strong>${moveCount}</strong> move${moveCount!==1?'s':''}.</p><button onclick="resetPuzzle()">Play again</button>`;
+    board.appendChild(banner);
+  },150);
+}
+
+function undoMove(){
+  if(!history.length)return;
+  const last=history.pop();
+  const piece=pieces.find(p=>p.id===last.id);
+  piece.col=last.fromCol;piece.row=last.fromRow;
+  moveCount--;
+  document.getElementById('moves').textContent=moveCount;
+  document.getElementById('undo-btn').disabled=history.length===0;
+  renderPiece(piece);
+}
+
+function resetPuzzle(){
+  pieces=INITIAL.map(p=>({...p}));
+  moveCount=0;history=[];
+  document.getElementById('moves').textContent='0';
+  document.getElementById('undo-btn').disabled=true;
+  document.querySelectorAll('.piece,.win-banner').forEach(el=>el.remove());
+  pieces.forEach(p=>renderPiece(p));
 }
 
 buildCells();
-pieces = INITIAL.map(p => ({ ...p }));
-pieces.forEach(p => renderPiece(p));
+pieces=INITIAL.map(p=>({...p}));
+pieces.forEach(p=>renderPiece(p));
 </script>
 </body>
 </html>
